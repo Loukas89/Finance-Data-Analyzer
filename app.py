@@ -6,6 +6,7 @@ from datetime import date
 from modules.db import (
     create_transactions_table,
     add_transaction,
+    add_multiple_transactions,
     get_all_transactions
 )
 
@@ -86,11 +87,12 @@ total_income, total_expenses, balance, saving_rate = calculate_metrics(transacti
 # --------------------------------------------------
 # Navigation tabs
 # --------------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Dashboard",
     "Add Transaction",
     "Transactions",
-    "Analytics"
+    "Analytics",
+    "Import / Analyze File"
 ])
 
 
@@ -371,3 +373,400 @@ with tab4:
                 )
             else:
                 st.info("Your income and expenses are currently equal.")
+
+# --------------------------------------------------
+# Import / Analyze Any File tab
+# --------------------------------------------------
+with tab5:
+    st.subheader("Import and Analyze Any CSV or Excel File")
+
+    st.write("""
+    Upload any `.csv` or `.xlsx` file.  
+    The app will automatically inspect the dataset without requiring predefined column names.
+    """)
+
+    uploaded_file = st.file_uploader(
+        "Upload a CSV or Excel file",
+        type=["csv", "xlsx"]
+    )
+
+    if uploaded_file is not None:
+        try:
+            # --------------------------------------------------
+            # Load any CSV or Excel file
+            # --------------------------------------------------
+            if uploaded_file.name.endswith(".csv"):
+                imported_df = pd.read_csv(
+                    uploaded_file,
+                    sep=None,
+                    engine="python"
+                )
+            else:
+                excel_file = pd.ExcelFile(uploaded_file)
+                sheet_name = st.selectbox(
+                    "Select Excel sheet",
+                    excel_file.sheet_names
+                )
+                imported_df = excel_file.parse(sheet_name)
+
+            st.success("File loaded successfully.")
+
+            # --------------------------------------------------
+            # Basic dataset overview
+            # --------------------------------------------------
+            st.subheader("Dataset Overview")
+
+            rows, columns = imported_df.shape
+            duplicate_rows = imported_df.duplicated().sum()
+            total_missing = imported_df.isnull().sum().sum()
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.metric("Rows", rows)
+
+            with col2:
+                st.metric("Columns", columns)
+
+            with col3:
+                st.metric("Missing Values", total_missing)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.metric("Duplicate Rows", duplicate_rows)
+
+            with col2:
+                st.metric("File Type", uploaded_file.name.split(".")[-1].upper())
+
+            st.divider()
+
+            # --------------------------------------------------
+            # Data preview
+            # --------------------------------------------------
+            st.subheader("Data Preview")
+            st.dataframe(imported_df.head(100), use_container_width=True)
+
+            # --------------------------------------------------
+            # Column analysis
+            # --------------------------------------------------
+            st.subheader("Column Analysis")
+
+            column_summary = pd.DataFrame({
+                "Column": imported_df.columns,
+                "Data Type": imported_df.dtypes.astype(str).values,
+                "Missing Values": imported_df.isnull().sum().values,
+                "Missing %": (
+                    imported_df.isnull().sum().values / len(imported_df) * 100
+                    if len(imported_df) > 0 else 0
+                ),
+                "Unique Values": imported_df.nunique(dropna=True).values
+            })
+
+            st.dataframe(column_summary, use_container_width=True)
+
+            # --------------------------------------------------
+            # Descriptive statistics
+            # --------------------------------------------------
+            st.subheader("Descriptive Statistics")
+
+            numeric_columns = imported_df.select_dtypes(include=["number"]).columns.tolist()
+            categorical_columns = imported_df.select_dtypes(include=["object", "category"]).columns.tolist()
+
+            if numeric_columns:
+                st.write("Numerical Columns")
+                st.dataframe(
+                    imported_df[numeric_columns].describe().T,
+                    use_container_width=True
+                )
+            else:
+                st.info("No numerical columns detected.")
+
+            if categorical_columns:
+                st.write("Categorical Columns")
+                categorical_summary = imported_df[categorical_columns].describe().T
+                st.dataframe(categorical_summary, use_container_width=True)
+            else:
+                st.info("No categorical columns detected.")
+
+            st.divider()
+
+            # --------------------------------------------------
+            # Missing values chart
+            # --------------------------------------------------
+            st.subheader("Missing Values Analysis")
+
+            missing_data = (
+                imported_df
+                .isnull()
+                .sum()
+                .reset_index()
+            )
+
+            missing_data.columns = ["Column", "Missing Values"]
+            missing_data = missing_data[missing_data["Missing Values"] > 0]
+
+            if missing_data.empty:
+                st.success("No missing values detected.")
+            else:
+                fig = px.bar(
+                    missing_data,
+                    x="Column",
+                    y="Missing Values",
+                    title="Missing Values per Column"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.divider()
+
+            # --------------------------------------------------
+            # Automatic visual analysis
+            # --------------------------------------------------
+            st.subheader("Automatic Visual Analysis")
+
+            if numeric_columns:
+                selected_numeric = st.selectbox(
+                    "Select numerical column for distribution",
+                    numeric_columns
+                )
+
+                fig = px.histogram(
+                    imported_df,
+                    x=selected_numeric,
+                    title=f"Distribution of {selected_numeric}"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+            if categorical_columns:
+                selected_category = st.selectbox(
+                    "Select categorical column for frequency analysis",
+                    categorical_columns
+                )
+
+                category_counts = (
+                    imported_df[selected_category]
+                    .value_counts()
+                    .head(20)
+                    .reset_index()
+                )
+
+                category_counts.columns = [selected_category, "Count"]
+
+                fig = px.bar(
+                    category_counts,
+                    x=selected_category,
+                    y="Count",
+                    title=f"Top Values in {selected_category}"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+            if len(numeric_columns) >= 2:
+                st.subheader("Scatter Plot")
+
+                x_axis = st.selectbox(
+                    "Select X axis",
+                    numeric_columns,
+                    key="scatter_x"
+                )
+
+                y_axis = st.selectbox(
+                    "Select Y axis",
+                    numeric_columns,
+                    key="scatter_y"
+                )
+
+                fig = px.scatter(
+                    imported_df,
+                    x=x_axis,
+                    y=y_axis,
+                    title=f"{x_axis} vs {y_axis}"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.subheader("Correlation Heatmap")
+
+                correlation_matrix = imported_df[numeric_columns].corr()
+
+                fig = px.imshow(
+                    correlation_matrix,
+                    text_auto=True,
+                    title="Correlation Matrix"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+            st.divider()
+
+            # --------------------------------------------------
+            # Optional finance transaction mapping
+            # --------------------------------------------------
+            st.subheader("Optional: Save This File as Finance Transactions")
+
+            st.write("""
+            If this file contains financial data, you can map its columns to the transaction fields below.
+            This allows the app to save the uploaded data into the SQLite transactions database.
+            """)
+
+            with st.expander("Map columns to transaction fields"):
+                all_columns = imported_df.columns.tolist()
+                optional_columns = ["None"] + all_columns
+
+                amount_column = st.selectbox(
+                    "Amount column",
+                    all_columns
+                )
+
+                date_column = st.selectbox(
+                    "Date column",
+                    optional_columns
+                )
+
+                type_column = st.selectbox(
+                    "Type column",
+                    optional_columns
+                )
+
+                category_column = st.selectbox(
+                    "Category column",
+                    optional_columns
+                )
+
+                payment_method_column = st.selectbox(
+                    "Payment method column",
+                    optional_columns
+                )
+
+                description_column = st.selectbox(
+                    "Description column",
+                    optional_columns
+                )
+
+                default_type = st.selectbox(
+                    "Default transaction type",
+                    ["Expense", "Income"]
+                )
+
+                default_category = st.text_input(
+                    "Default category",
+                    value="Imported"
+                )
+
+                default_payment_method = st.selectbox(
+                    "Default payment method",
+                    ["Other", "Cash", "Card", "Bank Transfer"]
+                )
+
+                if st.button("Save Mapped Data as Transactions"):
+                    mapped_df = imported_df.copy()
+
+                    # Amount handling
+                    mapped_df["_amount"] = pd.to_numeric(
+                        mapped_df[amount_column],
+                        errors="coerce"
+                    )
+
+                    mapped_df = mapped_df.dropna(subset=["_amount"])
+
+                    # Date handling
+                    if date_column != "None":
+                        mapped_df["_date"] = pd.to_datetime(
+                            mapped_df[date_column],
+                            errors="coerce"
+                        ).dt.strftime("%Y-%m-%d")
+
+                        mapped_df["_date"] = mapped_df["_date"].fillna(
+                            str(date.today())
+                        )
+                    else:
+                        mapped_df["_date"] = str(date.today())
+
+                    # Type handling
+                    if type_column != "None":
+                        mapped_df["_type"] = (
+                            mapped_df[type_column]
+                            .astype(str)
+                            .str.strip()
+                            .str.lower()
+                        )
+
+                        mapped_df["_type"] = mapped_df["_type"].replace({
+                            "income": "Income",
+                            "credit": "Income",
+                            "deposit": "Income",
+                            "salary": "Income",
+                            "expense": "Expense",
+                            "debit": "Expense",
+                            "withdrawal": "Expense",
+                            "payment": "Expense"
+                        })
+
+                        mapped_df["_type"] = mapped_df["_type"].apply(
+                            lambda value: value if value in ["Income", "Expense"] else default_type
+                        )
+                    else:
+                        mapped_df["_type"] = mapped_df["_amount"].apply(
+                            lambda value: "Expense" if value < 0 else default_type
+                        )
+
+                    # Store amount as positive value
+                    mapped_df["_amount"] = mapped_df["_amount"].abs()
+
+                    # Category handling
+                    if category_column != "None":
+                        mapped_df["_category"] = (
+                            mapped_df[category_column]
+                            .fillna(default_category)
+                            .astype(str)
+                            .str.strip()
+                        )
+                    else:
+                        mapped_df["_category"] = default_category
+
+                    # Payment method handling
+                    if payment_method_column != "None":
+                        mapped_df["_payment_method"] = (
+                            mapped_df[payment_method_column]
+                            .fillna(default_payment_method)
+                            .astype(str)
+                            .str.strip()
+                        )
+                    else:
+                        mapped_df["_payment_method"] = default_payment_method
+
+                    # Description handling
+                    if description_column != "None":
+                        mapped_df["_description"] = (
+                            mapped_df[description_column]
+                            .fillna("")
+                            .astype(str)
+                        )
+                    else:
+                        mapped_df["_description"] = ""
+
+                    transactions = list(
+                        mapped_df[
+                            [
+                                "_date",
+                                "_type",
+                                "_category",
+                                "_amount",
+                                "_payment_method",
+                                "_description"
+                            ]
+                        ].itertuples(index=False, name=None)
+                    )
+
+                    add_multiple_transactions(transactions)
+
+                    st.success(
+                        f"{len(transactions)} transactions saved successfully."
+                    )
+
+                    st.rerun()
+
+        except Exception as e:
+            st.error("Something went wrong while reading or analysing the file.")
+            st.exception(e)

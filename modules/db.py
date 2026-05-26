@@ -73,3 +73,21 @@ def get_all_transactions():
 
     conn.close()
     return df
+
+def add_multiple_transactions(transactions):
+    """
+    Adds multiple transactions to the database.
+    Each transaction must be a tuple:
+    (date, type, category, amount, payment_method, description)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.executemany("""
+        INSERT INTO transactions 
+        (date, type, category, amount, payment_method, description)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, transactions)
+
+    conn.commit()
+    conn.close()
