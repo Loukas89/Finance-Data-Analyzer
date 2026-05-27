@@ -65,7 +65,63 @@ def calculate_metrics(df):
 
     return total_income, total_expenses, balance, saving_rate
 
+def apply_date_filter(df):
+    """
+    Applies a date filter to the transactions dataframe using the sidebar.
+    """
+    if df.empty:
+        return df
 
+    st.sidebar.header("Date Filter")
+
+    filter_option = st.sidebar.selectbox(
+        "Select period",
+        ["All Data", "This Month", "Last Month", "Last 3 Months", "Custom Range"]
+    )
+
+    today = pd.Timestamp.today()
+    current_month_start = today.replace(day=1)
+
+    if filter_option == "All Data":
+        return df
+
+    elif filter_option == "This Month":
+        return df[df["date"] >= current_month_start]
+
+    elif filter_option == "Last Month":
+        last_month_end = current_month_start - pd.Timedelta(days=1)
+        last_month_start = last_month_end.replace(day=1)
+
+        return df[
+            (df["date"] >= last_month_start) &
+            (df["date"] <= last_month_end)
+        ]
+
+    elif filter_option == "Last 3 Months":
+        three_months_ago = today - pd.DateOffset(months=3)
+
+        return df[df["date"] >= three_months_ago]
+
+    elif filter_option == "Custom Range":
+        min_date = df["date"].min().date()
+        max_date = df["date"].max().date()
+
+        start_date = st.sidebar.date_input(
+            "Start date",
+            value=min_date
+        )
+
+        end_date = st.sidebar.date_input(
+            "End date",
+            value=max_date
+        )
+
+        return df[
+            (df["date"].dt.date >= start_date) &
+            (df["date"].dt.date <= end_date)
+        ]
+
+    return df
 # --------------------------------------------------
 # App title
 # --------------------------------------------------
@@ -80,11 +136,12 @@ and understand your spending habits.
 # --------------------------------------------------
 # Load data
 # --------------------------------------------------
-transactions_df = get_all_transactions()
-transactions_df = prepare_dataframe(transactions_df)
+all_transactions_df = get_all_transactions()
+all_transactions_df = prepare_dataframe(all_transactions_df)
+
+transactions_df = apply_date_filter(all_transactions_df)
 
 total_income, total_expenses, balance, saving_rate = calculate_metrics(transactions_df)
-
 
 # --------------------------------------------------
 # Navigation tabs
@@ -108,6 +165,7 @@ with tab1:
 
     with col1:
         st.metric("Total Income", f"€{total_income:,.2f}")
+        st.caption("The values below are based on the selected date filter.")
 
     with col2:
         st.metric("Total Expenses", f"€{total_expenses:,.2f}")
