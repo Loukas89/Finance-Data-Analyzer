@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import io
 from datetime import date
 
 from modules.db import (
@@ -64,6 +65,17 @@ def calculate_metrics(df):
         saving_rate = 0
 
     return total_income, total_expenses, balance, saving_rate
+
+def convert_df_to_excel(df):
+    """
+    Converts a pandas DataFrame to an Excel file in memory.
+    """
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Transactions")
+
+    return output.getvalue()
 
 def apply_date_filter(df):
     """
@@ -287,21 +299,41 @@ with tab3:
     if transactions_df.empty:
         st.info("No transactions have been added yet.")
     else:
+        # --------------------------------------------------
+        # Filters
+        # --------------------------------------------------
+        st.write("Use the filters below to search and manage your transactions.")
+
         col1, col2, col3 = st.columns(3)
 
         with col1:
             selected_type = st.selectbox(
                 "Filter by Type",
-                ["All", "Income", "Expense"]
+                ["All", "Income", "Expense"],
+                key="transactions_filter_type"
             )
 
         with col2:
-            categories = ["All"] + sorted(transactions_df["category"].unique().tolist())
-            selected_category = st.selectbox("Filter by Category", categories)
+            categories = ["All"] + sorted(
+                transactions_df["category"].dropna().unique().tolist()
+            )
+
+            selected_category = st.selectbox(
+                "Filter by Category",
+                categories,
+                key="transactions_filter_category"
+            )
 
         with col3:
-            payment_methods = ["All"] + sorted(transactions_df["payment_method"].unique().tolist())
-            selected_payment = st.selectbox("Filter by Payment Method", payment_methods)
+            payment_methods = ["All"] + sorted(
+                transactions_df["payment_method"].dropna().unique().tolist()
+            )
+
+            selected_payment = st.selectbox(
+                "Filter by Payment Method",
+                payment_methods,
+                key="transactions_filter_payment"
+            )
 
         filtered_df = transactions_df.copy()
 
@@ -314,16 +346,114 @@ with tab3:
         if selected_payment != "All":
             filtered_df = filtered_df[filtered_df["payment_method"] == selected_payment]
 
-        st.dataframe(filtered_df, use_container_width=True)
-
+        # --------------------------------------------------
+        # Filtered summary
+        # --------------------------------------------------
         st.divider()
 
-        st.subheader("Edit Transaction")
+        st.subheader("Filtered Summary")
 
-        with st.expander("Edit a selected transaction"):
-            if filtered_df.empty:
-                st.info("No transactions available to edit.")
-            else:
+        filtered_income = filtered_df[filtered_df["type"] == "Income"]["amount"].sum()
+        filtered_expenses = filtered_df[filtered_df["type"] == "Expense"]["amount"].sum()
+        filtered_balance = filtered_income - filtered_expenses
+        filtered_count = len(filtered_df)
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Transactions", filtered_count)
+
+        with col2:
+            st.metric("Income", f"€{filtered_income:,.2f}")
+
+        with col3:
+            st.metric("Expenses", f"€{filtered_expenses:,.2f}")
+
+        with col4:
+            st.metric("Balance", f"€{filtered_balance:,.2f}")
+
+        # --------------------------------------------------
+        # Transactions table
+        # --------------------------------------------------
+        st.divider()
+
+        st.subheader("Transactions Table")
+
+        if filtered_df.empty:
+            st.info("No transactions match the selected filters.")
+        else:
+            display_df = filtered_df.copy()
+
+            display_df["date"] = pd.to_datetime(
+                display_df["date"],
+                errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
+
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            # --------------------------------------------------
+            # Export transactions
+            # --------------------------------------------------
+            st.divider()
+
+            st.subheader("Export Transactions")
+
+            st.write(
+                "Download the currently filtered transactions as CSV or Excel."
+            )
+
+            export_columns = [
+                "id",
+                "date",
+                "type",
+                "category",
+                "amount",
+                "payment_method",
+                "description"
+            ]
+
+            export_df = filtered_df[export_columns].copy()
+
+            export_df["date"] = pd.to_datetime(
+                export_df["date"],
+                errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
+
+            csv_data = export_df.to_csv(index=False).encode("utf-8")
+            excel_data = convert_df_to_excel(export_df)
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.download_button(
+                    label="Download as CSV",
+                    data=csv_data,
+                    file_name="transactions_export.csv",
+                    mime="text/csv",
+                    key="download_transactions_csv"
+                )
+
+            with col2:
+                st.download_button(
+                    label="Download as Excel",
+                    data=excel_data,
+                    file_name="transactions_export.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_transactions_excel"
+                )
+
+            # --------------------------------------------------
+            # Edit transaction
+            # --------------------------------------------------
+            st.divider()
+
+            st.subheader("Edit Transaction")
+
+            with st.expander("Edit a selected transaction"):
                 edit_transaction_id = st.selectbox(
                     "Select transaction ID to edit",
                     filtered_df["id"].tolist(),
@@ -334,21 +464,36 @@ with tab3:
                     filtered_df["id"] == edit_transaction_id
                 ].iloc[0]
 
+                st.write("Selected transaction:")
+                st.dataframe(
+                    filtered_df[filtered_df["id"] == edit_transaction_id],
+                    use_container_width=True,
+                    hide_index=True
+                )
+
                 with st.form("edit_transaction_form"):
                     col1, col2 = st.columns(2)
 
                     with col1:
                         edited_date = st.date_input(
                             "Date",
-                            value=pd.to_datetime(transaction_to_edit["date"]).date(),
-                            key="edited_date"
+                            value=pd.to_datetime(
+                                transaction_to_edit["date"]
+                            ).date(),
+                            key="edited_transaction_date"
                         )
 
                         edited_type = st.selectbox(
                             "Type",
                             ["Income", "Expense"],
-                            index=["Income", "Expense"].index(transaction_to_edit["type"]),
-                            key="edited_type"
+                            index=(
+                                ["Income", "Expense"].index(
+                                    transaction_to_edit["type"]
+                                )
+                                if transaction_to_edit["type"] in ["Income", "Expense"]
+                                else 1
+                            ),
+                            key="edited_transaction_type"
                         )
 
                         edited_amount = st.number_input(
@@ -356,31 +501,46 @@ with tab3:
                             min_value=0.01,
                             step=0.50,
                             value=float(transaction_to_edit["amount"]),
-                            key="edited_amount"
+                            key="edited_transaction_amount"
                         )
 
                     with col2:
                         edited_category = st.text_input(
                             "Category",
                             value=str(transaction_to_edit["category"]),
-                            key="edited_category"
+                            key="edited_transaction_category"
+                        )
+
+                        payment_options = [
+                            "Cash",
+                            "Card",
+                            "Bank Transfer",
+                            "Other"
+                        ]
+
+                        current_payment_method = str(
+                            transaction_to_edit["payment_method"]
                         )
 
                         edited_payment_method = st.selectbox(
                             "Payment Method",
-                            ["Cash", "Card", "Bank Transfer", "Other"],
+                            payment_options,
                             index=(
-                                ["Cash", "Card", "Bank Transfer", "Other"].index(transaction_to_edit["payment_method"])
-                                if transaction_to_edit["payment_method"] in ["Cash", "Card", "Bank Transfer", "Other"]
+                                payment_options.index(current_payment_method)
+                                if current_payment_method in payment_options
                                 else 3
                             ),
-                            key="edited_payment_method"
+                            key="edited_transaction_payment_method"
                         )
 
                         edited_description = st.text_area(
                             "Description",
-                            value=str(transaction_to_edit["description"]),
-                            key="edited_description"
+                            value=(
+                                ""
+                                if pd.isna(transaction_to_edit["description"])
+                                else str(transaction_to_edit["description"])
+                            ),
+                            key="edited_transaction_description"
                         )
 
                     update_submitted = st.form_submit_button("Save Changes")
@@ -401,39 +561,49 @@ with tab3:
 
                             st.success("Transaction updated successfully.")
                             st.rerun()
-        
-        st.divider()
 
-        st.subheader("Delete Transaction")
+            # --------------------------------------------------
+            # Delete transaction
+            # --------------------------------------------------
+            st.divider()
 
-        with st.expander("Delete a selected transaction"):
-            if filtered_df.empty:
-                st.info("No transactions available to delete.")
-            else:
-                transaction_ids = filtered_df["id"].tolist()
+            st.subheader("Delete Transaction")
 
-                selected_transaction_id = st.selectbox(
+            with st.expander("Delete a selected transaction"):
+                delete_transaction_id = st.selectbox(
                     "Select transaction ID to delete",
-                    transaction_ids
+                    filtered_df["id"].tolist(),
+                    key="delete_transaction_id"
                 )
 
                 selected_transaction = filtered_df[
-                    filtered_df["id"] == selected_transaction_id
+                    filtered_df["id"] == delete_transaction_id
                 ]
 
                 st.write("Selected transaction:")
-                st.dataframe(selected_transaction, use_container_width=True)
-
-                confirm_delete = st.checkbox(
-                    "I confirm that I want to delete this transaction."
+                st.dataframe(
+                    selected_transaction,
+                    use_container_width=True,
+                    hide_index=True
                 )
 
-                if st.button("Delete Selected Transaction"):
+                confirm_delete = st.checkbox(
+                    "I confirm that I want to delete this transaction.",
+                    key="confirm_delete_transaction"
+                )
+
+                if st.button(
+                    "Delete Selected Transaction",
+                    key="delete_selected_transaction_button"
+                ):
                     if confirm_delete:
-                        delete_transaction(selected_transaction_id)
+                        delete_transaction(delete_transaction_id)
                         st.success("Transaction deleted successfully.")
                         st.rerun()
                     else:
+                        st.warning(
+                            "Please confirm before deleting the transaction."
+                        )
                         st.warning("Please confirm before deleting the transaction.")
 
 
