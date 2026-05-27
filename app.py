@@ -7,7 +7,8 @@ from modules.db import (
     create_transactions_table,
     add_transaction,
     add_multiple_transactions,
-    get_all_transactions
+    get_all_transactions,
+    delete_transaction  
 )
 
 
@@ -255,6 +256,40 @@ with tab3:
             filtered_df = filtered_df[filtered_df["payment_method"] == selected_payment]
 
         st.dataframe(filtered_df, use_container_width=True)
+        
+        st.divider()
+
+        st.subheader("Delete Transaction")
+
+        with st.expander("Delete a selected transaction"):
+            if filtered_df.empty:
+                st.info("No transactions available to delete.")
+            else:
+                transaction_ids = filtered_df["id"].tolist()
+
+                selected_transaction_id = st.selectbox(
+                    "Select transaction ID to delete",
+                    transaction_ids
+                )
+
+                selected_transaction = filtered_df[
+                    filtered_df["id"] == selected_transaction_id
+                ]
+
+                st.write("Selected transaction:")
+                st.dataframe(selected_transaction, use_container_width=True)
+
+                confirm_delete = st.checkbox(
+                    "I confirm that I want to delete this transaction."
+                )
+
+                if st.button("Delete Selected Transaction"):
+                    if confirm_delete:
+                        delete_transaction(selected_transaction_id)
+                        st.success("Transaction deleted successfully.")
+                        st.rerun()
+                    else:
+                        st.warning("Please confirm before deleting the transaction.")
 
 
 # --------------------------------------------------
