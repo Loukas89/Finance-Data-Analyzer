@@ -8,7 +8,8 @@ from modules.db import (
     add_transaction,
     add_multiple_transactions,
     get_all_transactions,
-    delete_transaction  
+    delete_transaction, 
+    update_transaction 
 )
 
 
@@ -256,6 +257,92 @@ with tab3:
             filtered_df = filtered_df[filtered_df["payment_method"] == selected_payment]
 
         st.dataframe(filtered_df, use_container_width=True)
+
+        st.divider()
+
+        st.subheader("Edit Transaction")
+
+        with st.expander("Edit a selected transaction"):
+            if filtered_df.empty:
+                st.info("No transactions available to edit.")
+            else:
+                edit_transaction_id = st.selectbox(
+                    "Select transaction ID to edit",
+                    filtered_df["id"].tolist(),
+                    key="edit_transaction_id"
+                )
+
+                transaction_to_edit = filtered_df[
+                    filtered_df["id"] == edit_transaction_id
+                ].iloc[0]
+
+                with st.form("edit_transaction_form"):
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        edited_date = st.date_input(
+                            "Date",
+                            value=pd.to_datetime(transaction_to_edit["date"]).date(),
+                            key="edited_date"
+                        )
+
+                        edited_type = st.selectbox(
+                            "Type",
+                            ["Income", "Expense"],
+                            index=["Income", "Expense"].index(transaction_to_edit["type"]),
+                            key="edited_type"
+                        )
+
+                        edited_amount = st.number_input(
+                            "Amount (€)",
+                            min_value=0.01,
+                            step=0.50,
+                            value=float(transaction_to_edit["amount"]),
+                            key="edited_amount"
+                        )
+
+                    with col2:
+                        edited_category = st.text_input(
+                            "Category",
+                            value=str(transaction_to_edit["category"]),
+                            key="edited_category"
+                        )
+
+                        edited_payment_method = st.selectbox(
+                            "Payment Method",
+                            ["Cash", "Card", "Bank Transfer", "Other"],
+                            index=(
+                                ["Cash", "Card", "Bank Transfer", "Other"].index(transaction_to_edit["payment_method"])
+                                if transaction_to_edit["payment_method"] in ["Cash", "Card", "Bank Transfer", "Other"]
+                                else 3
+                            ),
+                            key="edited_payment_method"
+                        )
+
+                        edited_description = st.text_area(
+                            "Description",
+                            value=str(transaction_to_edit["description"]),
+                            key="edited_description"
+                        )
+
+                    update_submitted = st.form_submit_button("Save Changes")
+
+                    if update_submitted:
+                        if edited_category.strip() == "":
+                            st.error("Category cannot be empty.")
+                        else:
+                            update_transaction(
+                                edit_transaction_id,
+                                str(edited_date),
+                                edited_type,
+                                edited_category.strip(),
+                                edited_amount,
+                                edited_payment_method,
+                                edited_description.strip()
+                            )
+
+                            st.success("Transaction updated successfully.")
+                            st.rerun()
         
         st.divider()
 

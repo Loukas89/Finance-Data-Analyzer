@@ -108,3 +108,33 @@ def delete_transaction(transaction_id):
 
     conn.commit()
     conn.close()
+
+def update_transaction(transaction_id, date, transaction_type, category, amount, payment_method, description):
+    """
+    Updates an existing transaction based on its ID.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        UPDATE transactions
+        SET 
+            date = ?,
+            type = ?,
+            category = ?,
+            amount = ?,
+            payment_method = ?,
+            description = ?
+        WHERE id = ?
+    """, (
+        date,
+        transaction_type,
+        category,
+        amount,
+        payment_method,
+        description,
+        transaction_id
+    ))
+
+    conn.commit()
+    conn.close()
