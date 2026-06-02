@@ -134,6 +134,144 @@ def apply_date_filter(df):
         ]
 
     return df
+
+def generate_monthly_report_html(report_df, selected_month):
+    """
+    Generates a simple HTML monthly financial report.
+    """
+    total_income, total_expenses, balance, saving_rate = calculate_metrics(report_df)
+
+    expenses_df = report_df[report_df["type"] == "Expense"]
+
+    if not expenses_df.empty:
+        top_categories = (
+            expenses_df
+            .groupby("category", as_index=False)["amount"]
+            .sum()
+            .sort_values(by="amount", ascending=False)
+            .head(5)
+        )
+
+        top_categories_html = top_categories.to_html(index=False)
+    else:
+        top_categories_html = "<p>No expense data available.</p>"
+
+    transactions_html = report_df[
+        [
+            "date",
+            "type",
+            "category",
+            "amount",
+            "payment_method",
+            "description"
+        ]
+    ].to_html(index=False)
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Monthly Financial Report - {selected_month}</title>
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                margin: 40px;
+                color: #222;
+                background-color: #f8f9fa;
+            }}
+
+            h1, h2 {{
+                color: #1f2937;
+            }}
+
+            .card {{
+                background: white;
+                padding: 20px;
+                margin-bottom: 20px;
+                border-radius: 10px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            }}
+
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                background: white;
+                margin-top: 10px;
+            }}
+
+            th, td {{
+                border: 1px solid #ddd;
+                padding: 8px;
+                text-align: left;
+            }}
+
+            th {{
+                background-color: #1f2937;
+                color: white;
+            }}
+
+            .positive {{
+                color: green;
+                font-weight: bold;
+            }}
+
+            .negative {{
+                color: red;
+                font-weight: bold;
+            }}
+        </style>
+    </head>
+    <body>
+        <h1>Monthly Financial Report - {selected_month}</h1>
+
+        <div class="card">
+            <h2>Financial Summary</h2>
+            <p><strong>Total Income:</strong> €{total_income:,.2f}</p>
+            <p><strong>Total Expenses:</strong> €{total_expenses:,.2f}</p>
+            <p><strong>Balance:</strong> €{balance:,.2f}</p>
+            <p><strong>Saving Rate:</strong> {saving_rate:.1f}%</p>
+        </div>
+
+        <div class="card">
+            <h2>Top Expense Categories</h2>
+            {top_categories_html}
+        </div>
+
+        <div class="card">
+            <h2>Insights</h2>
+    """
+
+    if balance > 0:
+        html_content += f"""
+            <p class="positive">You had a positive balance of €{balance:,.2f} this month.</p>
+        """
+    elif balance < 0:
+        html_content += f"""
+            <p class="negative">Your expenses were higher than your income by €{abs(balance):,.2f}.</p>
+        """
+    else:
+        html_content += """
+            <p>Your income and expenses were equal this month.</p>
+        """
+
+    if total_income > 0:
+        html_content += f"""
+            <p>Your saving rate for this month was {saving_rate:.1f}%.</p>
+        """
+
+    html_content += f"""
+        </div>
+
+        <div class="card">
+            <h2>Transactions</h2>
+            {transactions_html}
+        </div>
+    </body>
+    </html>
+    """
+
+    return html_content
 # --------------------------------------------------
 # App title
 # --------------------------------------------------
@@ -158,12 +296,13 @@ total_income, total_expenses, balance, saving_rate = calculate_metrics(transacti
 # --------------------------------------------------
 # Navigation tabs
 # --------------------------------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "Dashboard",
     "Add Transaction",
     "Transactions",
     "Analytics",
-    "Import / Analyze File"
+    "Import / Analyze File",
+    "Reports"
 ])
 
 
@@ -1120,3 +1259,211 @@ with tab5:
         except Exception as e:
             st.error("Something went wrong while reading or analysing the file.")
             st.exception(e)
+
+# --------------------------------------------------
+# Reports tab
+# --------------------------------------------------
+with tab6:
+    st.subheader("Monthly Financial Report")
+
+    st.write("""
+    Select a month to generate a financial report based on your saved transactions.
+    """)
+
+    if all_transactions_df.empty:
+        st.info("No transactions available for report generation.")
+    else:
+        report_data = all_transactions_df.copy()
+
+        report_data["date"] = pd.to_datetime(
+            report_data["date"],
+            errors="coerce"
+        )
+
+        report_data = report_data.dropna(subset=["date"])
+
+        report_data["month"] = report_data["date"].dt.to_period("M").astype(str)
+
+        available_months = sorted(
+            report_data["month"].dropna().unique().tolist(),
+            reverse=True
+        )
+
+        if not available_months:
+            st.info("No valid transaction dates available.")
+        else:
+            selected_report_month = st.selectbox(
+                "Select month",
+                available_months
+            )
+
+            monthly_report_df = report_data[
+                report_data["month"] == selected_report_month
+            ].copy()
+
+            total_income_report, total_expenses_report, balance_report, saving_rate_report = calculate_metrics(
+                monthly_report_df
+            )
+
+            st.divider()
+
+            st.subheader(f"Summary for {selected_report_month}")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("Total Income", f"€{total_income_report:,.2f}")
+
+            with col2:
+                st.metric("Total Expenses", f"€{total_expenses_report:,.2f}")
+
+            with col3:
+                st.metric("Balance", f"€{balance_report:,.2f}")
+
+            with col4:
+                st.metric("Saving Rate", f"{saving_rate_report:.1f}%")
+
+            st.divider()
+
+            expenses_report_df = monthly_report_df[
+                monthly_report_df["type"] == "Expense"
+            ]
+
+            if expenses_report_df.empty:
+                st.info("No expenses found for this month.")
+            else:
+                st.subheader("Top Expense Categories")
+
+                top_categories_report = (
+                    expenses_report_df
+                    .groupby("category", as_index=False)["amount"]
+                    .sum()
+                    .sort_values(by="amount", ascending=False)
+                    .head(10)
+                )
+
+                fig = px.bar(
+                    top_categories_report,
+                    x="category",
+                    y="amount",
+                    title=f"Top Expense Categories - {selected_report_month}"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.dataframe(
+                    top_categories_report,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            st.divider()
+
+            st.subheader("Income vs Expenses")
+
+            monthly_type_summary = (
+                monthly_report_df
+                .groupby("type", as_index=False)["amount"]
+                .sum()
+            )
+
+            fig = px.pie(
+                monthly_type_summary,
+                names="type",
+                values="amount",
+                title=f"Income vs Expenses - {selected_report_month}"
+            )
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.divider()
+
+            st.subheader("Automatic Insights")
+
+            if balance_report > 0:
+                st.success(
+                    f"You had a positive balance of €{balance_report:,.2f} in {selected_report_month}."
+                )
+            elif balance_report < 0:
+                st.warning(
+                    f"Your expenses were higher than your income by €{abs(balance_report):,.2f} in {selected_report_month}."
+                )
+            else:
+                st.info(
+                    f"Your income and expenses were equal in {selected_report_month}."
+                )
+
+            if total_income_report > 0:
+                st.write(
+                    f"Your saving rate for this month was **{saving_rate_report:.1f}%**."
+                )
+
+            if not expenses_report_df.empty:
+                highest_category = (
+                    expenses_report_df
+                    .groupby("category")["amount"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .index[0]
+                )
+
+                highest_category_amount = (
+                    expenses_report_df
+                    .groupby("category")["amount"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .iloc[0]
+                )
+
+                category_percentage = (
+                    highest_category_amount / total_expenses_report * 100
+                    if total_expenses_report > 0 else 0
+                )
+
+                st.write(
+                    f"Your highest spending category was **{highest_category}**, "
+                    f"representing **{category_percentage:.1f}%** of your total expenses."
+                )
+
+            st.divider()
+
+            st.subheader("Transactions Included in Report")
+
+            report_display_df = monthly_report_df[
+                [
+                    "id",
+                    "date",
+                    "type",
+                    "category",
+                    "amount",
+                    "payment_method",
+                    "description"
+                ]
+            ].copy()
+
+            report_display_df["date"] = pd.to_datetime(
+                report_display_df["date"],
+                errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
+
+            st.dataframe(
+                report_display_df,
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.divider()
+
+            st.subheader("Download Report")
+
+            html_report = generate_monthly_report_html(
+                monthly_report_df,
+                selected_report_month
+            )
+
+            st.download_button(
+                label="Download HTML Report",
+                data=html_report,
+                file_name=f"monthly_financial_report_{selected_report_month}.html",
+                mime="text/html"
+            )
