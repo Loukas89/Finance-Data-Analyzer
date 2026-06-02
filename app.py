@@ -135,9 +135,42 @@ def apply_date_filter(df):
 
     return df
 
-def generate_monthly_report_html(report_df, selected_month):
+def get_report_period(report_type, end_date):
     """
-    Generates a simple HTML monthly financial report.
+    Returns the start date and end date for the selected report period.
+    """
+    end_date = pd.to_datetime(end_date)
+
+    if report_type == "Weekly":
+        start_date = end_date - pd.Timedelta(days=6)
+
+    elif report_type == "15 Days":
+        start_date = end_date - pd.Timedelta(days=14)
+
+    elif report_type == "Monthly":
+        start_date = end_date - pd.DateOffset(months=1)
+
+    elif report_type == "3 Months":
+        start_date = end_date - pd.DateOffset(months=3)
+
+    elif report_type == "6 Months":
+        start_date = end_date - pd.DateOffset(months=6)
+
+    elif report_type == "1 Year":
+        start_date = end_date - pd.DateOffset(years=1)
+
+    elif report_type == "2 Years":
+        start_date = end_date - pd.DateOffset(years=2)
+
+    else:
+        start_date = end_date
+
+    return start_date, end_date
+
+
+def generate_period_report_html(report_df, report_type, start_date, end_date):
+    """
+    Generates a simple HTML financial report for the selected period.
     """
     total_income, total_expenses, balance, saving_rate = calculate_metrics(report_df)
 
@@ -149,30 +182,33 @@ def generate_monthly_report_html(report_df, selected_month):
             .groupby("category", as_index=False)["amount"]
             .sum()
             .sort_values(by="amount", ascending=False)
-            .head(5)
+            .head(10)
         )
 
         top_categories_html = top_categories.to_html(index=False)
     else:
         top_categories_html = "<p>No expense data available.</p>"
 
-    transactions_html = report_df[
-        [
-            "date",
-            "type",
-            "category",
-            "amount",
-            "payment_method",
-            "description"
-        ]
-    ].to_html(index=False)
+    if not report_df.empty:
+        transactions_html = report_df[
+            [
+                "date",
+                "type",
+                "category",
+                "amount",
+                "payment_method",
+                "description"
+            ]
+        ].to_html(index=False)
+    else:
+        transactions_html = "<p>No transactions available for this period.</p>"
 
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
-        <title>Monthly Financial Report - {selected_month}</title>
+        <title>{report_type} Financial Report</title>
         <style>
             body {{
                 font-family: Arial, sans-serif;
@@ -223,7 +259,8 @@ def generate_monthly_report_html(report_df, selected_month):
         </style>
     </head>
     <body>
-        <h1>Monthly Financial Report - {selected_month}</h1>
+        <h1>{report_type} Financial Report</h1>
+        <p><strong>Period:</strong> {start_date.strftime("%Y-%m-%d")} to {end_date.strftime("%Y-%m-%d")}</p>
 
         <div class="card">
             <h2>Financial Summary</h2>
@@ -244,20 +281,20 @@ def generate_monthly_report_html(report_df, selected_month):
 
     if balance > 0:
         html_content += f"""
-            <p class="positive">You had a positive balance of €{balance:,.2f} this month.</p>
+            <p class="positive">You had a positive balance of €{balance:,.2f} during this period.</p>
         """
     elif balance < 0:
         html_content += f"""
-            <p class="negative">Your expenses were higher than your income by €{abs(balance):,.2f}.</p>
+            <p class="negative">Your expenses were higher than your income by €{abs(balance):,.2f} during this period.</p>
         """
     else:
         html_content += """
-            <p>Your income and expenses were equal this month.</p>
+            <p>Your income and expenses were equal during this period.</p>
         """
 
     if total_income > 0:
         html_content += f"""
-            <p>Your saving rate for this month was {saving_rate:.1f}%.</p>
+            <p>Your saving rate for this period was {saving_rate:.1f}%.</p>
         """
 
     html_content += f"""
@@ -272,6 +309,97 @@ def generate_monthly_report_html(report_df, selected_month):
     """
 
     return html_content
+
+def detect_expense_outliers(df):
+    """
+    Detects unusual expense transactions using the IQR method.
+    The function checks both category-level outliers and global expense outliers.
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    expenses_df = df[df["type"] == "Expense"].copy()
+
+    if expenses_df.empty or len(expenses_df) < 4:
+        return pd.DataFrame()
+
+    expenses_df["amount"] = pd.to_numeric(
+        expenses_df["amount"],
+        errors="coerce"
+    )
+
+    expenses_df = expenses_df.dropna(subset=["amount"])
+
+    outlier_frames = []
+
+    # --------------------------------------------------
+    # Category-level IQR detection
+    # --------------------------------------------------
+    for category, group in expenses_df.groupby("category"):
+        if len(group) < 4:
+            continue
+
+        q1 = group["amount"].quantile(0.25)
+        q3 = group["amount"].quantile(0.75)
+        iqr = q3 - q1
+
+        if iqr == 0:
+            continue
+
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+
+        category_outliers = group[
+            (group["amount"] < lower_bound) |
+            (group["amount"] > upper_bound)
+        ].copy()
+
+        if not category_outliers.empty:
+            category_outliers["outlier_method"] = "Category IQR"
+            category_outliers["lower_bound"] = round(lower_bound, 2)
+            category_outliers["upper_bound"] = round(upper_bound, 2)
+            category_outliers["reason"] = (
+                "Amount is unusual compared to other expenses in the same category."
+            )
+
+            outlier_frames.append(category_outliers)
+
+    # --------------------------------------------------
+    # Global IQR detection
+    # --------------------------------------------------
+    q1 = expenses_df["amount"].quantile(0.25)
+    q3 = expenses_df["amount"].quantile(0.75)
+    iqr = q3 - q1
+
+    if iqr != 0:
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
+
+        global_outliers = expenses_df[
+            (expenses_df["amount"] < lower_bound) |
+            (expenses_df["amount"] > upper_bound)
+        ].copy()
+
+        if not global_outliers.empty:
+            global_outliers["outlier_method"] = "Global IQR"
+            global_outliers["lower_bound"] = round(lower_bound, 2)
+            global_outliers["upper_bound"] = round(upper_bound, 2)
+            global_outliers["reason"] = (
+                "Amount is unusual compared to all expense transactions."
+            )
+
+            outlier_frames.append(global_outliers)
+
+    if not outlier_frames:
+        return pd.DataFrame()
+
+    outliers_df = pd.concat(outlier_frames, ignore_index=True)
+
+    # Remove duplicate outliers based on transaction ID
+    outliers_df = outliers_df.drop_duplicates(subset=["id"])
+
+    return outliers_df
+
 # --------------------------------------------------
 # App title
 # --------------------------------------------------
@@ -760,6 +888,9 @@ with tab4:
         if expenses_df.empty:
             st.info("No expense data available yet.")
         else:
+            # --------------------------------------------------
+            # Basic expense metrics
+            # --------------------------------------------------
             average_expense = expenses_df["amount"].mean()
             highest_expense = expenses_df["amount"].max()
             number_of_expenses = len(expenses_df)
@@ -788,6 +919,9 @@ with tab4:
 
             st.divider()
 
+            # --------------------------------------------------
+            # Charts
+            # --------------------------------------------------
             col1, col2 = st.columns(2)
 
             with col1:
@@ -831,6 +965,9 @@ with tab4:
 
             st.divider()
 
+            # --------------------------------------------------
+            # Automatic insights
+            # --------------------------------------------------
             st.subheader("Automatic Insights")
 
             most_expensive_category_amount = (
@@ -841,7 +978,10 @@ with tab4:
                 .iloc[0]
             )
 
-            expense_percentage = (most_expensive_category_amount / total_expenses) * 100
+            expense_percentage = (
+                most_expensive_category_amount / total_expenses * 100
+                if total_expenses > 0 else 0
+            )
 
             st.write(
                 f"Your highest spending category is **{top_category}**, "
@@ -863,6 +1003,86 @@ with tab4:
             else:
                 st.info("Your income and expenses are currently equal.")
 
+            st.divider()
+
+            # --------------------------------------------------
+            # Outlier detection
+            # --------------------------------------------------
+            st.subheader("Outlier Detection")
+
+            st.write("""
+            This section identifies unusual expense transactions using the IQR method.
+            It checks whether an expense amount is unusually high or low compared to other expenses.
+            """)
+
+            outliers_df = detect_expense_outliers(transactions_df)
+
+            if outliers_df.empty:
+                st.success("No unusual expense transactions were detected.")
+
+                if len(expenses_df) < 4:
+                    st.info(
+                        "At least 4 expense transactions are recommended for more reliable outlier detection."
+                    )
+            else:
+                st.warning(
+                    f"{len(outliers_df)} unusual expense transaction(s) detected."
+                )
+
+                outlier_display_df = outliers_df[
+                    [
+                        "id",
+                        "date",
+                        "category",
+                        "amount",
+                        "payment_method",
+                        "description",
+                        "outlier_method",
+                        "lower_bound",
+                        "upper_bound",
+                        "reason"
+                    ]
+                ].copy()
+
+                outlier_display_df["date"] = pd.to_datetime(
+                    outlier_display_df["date"],
+                    errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+
+                st.dataframe(
+                    outlier_display_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                fig = px.scatter(
+                    outliers_df,
+                    x="date",
+                    y="amount",
+                    color="category",
+                    size="amount",
+                    hover_data=[
+                        "id",
+                        "category",
+                        "payment_method",
+                        "description",
+                        "outlier_method"
+                    ],
+                    title="Detected Unusual Expenses"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                st.subheader("Outlier Explanation")
+
+                for _, row in outliers_df.iterrows():
+                    st.write(
+                        f"Transaction **ID {row['id']}** in category "
+                        f"**{row['category']}** was detected as unusual. "
+                        f"Amount: **€{row['amount']:,.2f}**. "
+                        f"Expected range: **€{row['lower_bound']:,.2f}** "
+                        f"to **€{row['upper_bound']:,.2f}**."
+                    )
 # --------------------------------------------------
 # Import / Analyze Any File tab
 # --------------------------------------------------
@@ -1264,10 +1484,10 @@ with tab5:
 # Reports tab
 # --------------------------------------------------
 with tab6:
-    st.subheader("Monthly Financial Report")
+    st.subheader("Financial Reports")
 
     st.write("""
-    Select a month to generate a financial report based on your saved transactions.
+    Generate financial reports for different time periods and download them as HTML files.
     """)
 
     if all_transactions_df.empty:
@@ -1282,188 +1502,226 @@ with tab6:
 
         report_data = report_data.dropna(subset=["date"])
 
-        report_data["month"] = report_data["date"].dt.to_period("M").astype(str)
-
-        available_months = sorted(
-            report_data["month"].dropna().unique().tolist(),
-            reverse=True
-        )
-
-        if not available_months:
+        if report_data.empty:
             st.info("No valid transaction dates available.")
         else:
-            selected_report_month = st.selectbox(
-                "Select month",
-                available_months
-            )
-
-            monthly_report_df = report_data[
-                report_data["month"] == selected_report_month
-            ].copy()
-
-            total_income_report, total_expenses_report, balance_report, saving_rate_report = calculate_metrics(
-                monthly_report_df
-            )
-
-            st.divider()
-
-            st.subheader(f"Summary for {selected_report_month}")
-
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2 = st.columns(2)
 
             with col1:
-                st.metric("Total Income", f"€{total_income_report:,.2f}")
-
-            with col2:
-                st.metric("Total Expenses", f"€{total_expenses_report:,.2f}")
-
-            with col3:
-                st.metric("Balance", f"€{balance_report:,.2f}")
-
-            with col4:
-                st.metric("Saving Rate", f"{saving_rate_report:.1f}%")
-
-            st.divider()
-
-            expenses_report_df = monthly_report_df[
-                monthly_report_df["type"] == "Expense"
-            ]
-
-            if expenses_report_df.empty:
-                st.info("No expenses found for this month.")
-            else:
-                st.subheader("Top Expense Categories")
-
-                top_categories_report = (
-                    expenses_report_df
-                    .groupby("category", as_index=False)["amount"]
-                    .sum()
-                    .sort_values(by="amount", ascending=False)
-                    .head(10)
+                selected_report_type = st.selectbox(
+                    "Select report type",
+                    [
+                        "Weekly",
+                        "15 Days",
+                        "Monthly",
+                        "3 Months",
+                        "6 Months",
+                        "1 Year",
+                        "2 Years"
+                    ]
                 )
 
-                fig = px.bar(
-                    top_categories_report,
-                    x="category",
-                    y="amount",
-                    title=f"Top Expense Categories - {selected_report_month}"
+            with col2:
+                selected_end_date = st.date_input(
+                    "Select report end date",
+                    value=date.today()
+                )
+
+            start_date, end_date = get_report_period(
+                selected_report_type,
+                selected_end_date
+            )
+
+            period_report_df = report_data[
+                (report_data["date"] >= start_date) &
+                (report_data["date"] <= end_date)
+            ].copy()
+
+            st.caption(
+                f"Report period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"
+            )
+
+            if period_report_df.empty:
+                st.warning("No transactions found for the selected period.")
+            else:
+                total_income_report, total_expenses_report, balance_report, saving_rate_report = calculate_metrics(
+                    period_report_df
+                )
+
+                st.divider()
+
+                st.subheader(f"{selected_report_type} Summary")
+
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric("Total Income", f"€{total_income_report:,.2f}")
+
+                with col2:
+                    st.metric("Total Expenses", f"€{total_expenses_report:,.2f}")
+
+                with col3:
+                    st.metric("Balance", f"€{balance_report:,.2f}")
+
+                with col4:
+                    st.metric("Saving Rate", f"{saving_rate_report:.1f}%")
+
+                st.divider()
+
+                expenses_report_df = period_report_df[
+                    period_report_df["type"] == "Expense"
+                ]
+
+                if expenses_report_df.empty:
+                    st.info("No expenses found for this period.")
+                else:
+                    st.subheader("Top Expense Categories")
+
+                    top_categories_report = (
+                        expenses_report_df
+                        .groupby("category", as_index=False)["amount"]
+                        .sum()
+                        .sort_values(by="amount", ascending=False)
+                        .head(10)
+                    )
+
+                    fig = px.bar(
+                        top_categories_report,
+                        x="category",
+                        y="amount",
+                        title=f"Top Expense Categories - {selected_report_type}"
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    st.dataframe(
+                        top_categories_report,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                st.divider()
+
+                st.subheader("Income vs Expenses")
+
+                type_summary_report = (
+                    period_report_df
+                    .groupby("type", as_index=False)["amount"]
+                    .sum()
+                )
+
+                fig = px.pie(
+                    type_summary_report,
+                    names="type",
+                    values="amount",
+                    title=f"Income vs Expenses - {selected_report_type}"
                 )
 
                 st.plotly_chart(fig, use_container_width=True)
 
+                st.divider()
+
+                st.subheader("Automatic Insights")
+
+                if balance_report > 0:
+                    st.success(
+                        f"You had a positive balance of €{balance_report:,.2f} during this period."
+                    )
+                elif balance_report < 0:
+                    st.warning(
+                        f"Your expenses were higher than your income by €{abs(balance_report):,.2f} during this period."
+                    )
+                else:
+                    st.info(
+                        "Your income and expenses were equal during this period."
+                    )
+
+                if total_income_report > 0:
+                    st.write(
+                        f"Your saving rate for this period was **{saving_rate_report:.1f}%**."
+                    )
+
+                if not expenses_report_df.empty:
+                    highest_category = (
+                        expenses_report_df
+                        .groupby("category")["amount"]
+                        .sum()
+                        .sort_values(ascending=False)
+                        .index[0]
+                    )
+
+                    highest_category_amount = (
+                        expenses_report_df
+                        .groupby("category")["amount"]
+                        .sum()
+                        .sort_values(ascending=False)
+                        .iloc[0]
+                    )
+
+                    category_percentage = (
+                        highest_category_amount / total_expenses_report * 100
+                        if total_expenses_report > 0 else 0
+                    )
+
+                    st.write(
+                        f"Your highest spending category was **{highest_category}**, "
+                        f"representing **{category_percentage:.1f}%** of your total expenses."
+                    )
+
+                st.divider()
+
+                st.subheader("Transactions Included in Report")
+
+                report_display_df = period_report_df[
+                    [
+                        "id",
+                        "date",
+                        "type",
+                        "category",
+                        "amount",
+                        "payment_method",
+                        "description"
+                    ]
+                ].copy()
+
+                report_display_df["date"] = pd.to_datetime(
+                    report_display_df["date"],
+                    errors="coerce"
+                ).dt.strftime("%Y-%m-%d")
+
                 st.dataframe(
-                    top_categories_report,
+                    report_display_df,
                     use_container_width=True,
                     hide_index=True
                 )
 
-            st.divider()
+                st.divider()
 
-            st.subheader("Income vs Expenses")
+                st.subheader("Download Report")
 
-            monthly_type_summary = (
-                monthly_report_df
-                .groupby("type", as_index=False)["amount"]
-                .sum()
-            )
-
-            fig = px.pie(
-                monthly_type_summary,
-                names="type",
-                values="amount",
-                title=f"Income vs Expenses - {selected_report_month}"
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-
-            st.divider()
-
-            st.subheader("Automatic Insights")
-
-            if balance_report > 0:
-                st.success(
-                    f"You had a positive balance of €{balance_report:,.2f} in {selected_report_month}."
-                )
-            elif balance_report < 0:
-                st.warning(
-                    f"Your expenses were higher than your income by €{abs(balance_report):,.2f} in {selected_report_month}."
-                )
-            else:
-                st.info(
-                    f"Your income and expenses were equal in {selected_report_month}."
+                html_report = generate_period_report_html(
+                    period_report_df,
+                    selected_report_type,
+                    start_date,
+                    end_date
                 )
 
-            if total_income_report > 0:
-                st.write(
-                    f"Your saving rate for this month was **{saving_rate_report:.1f}%**."
+                file_period = (
+                    f"{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}"
                 )
 
-            if not expenses_report_df.empty:
-                highest_category = (
-                    expenses_report_df
-                    .groupby("category")["amount"]
-                    .sum()
-                    .sort_values(ascending=False)
-                    .index[0]
+                st.download_button(
+                    label="Download HTML Report",
+                    data=html_report,
+                    file_name=f"{selected_report_type.lower().replace(' ', '_')}_financial_report_{file_period}.html",
+                    mime="text/html"
                 )
 
-                highest_category_amount = (
-                    expenses_report_df
-                    .groupby("category")["amount"]
-                    .sum()
-                    .sort_values(ascending=False)
-                    .iloc[0]
+                csv_report = report_display_df.to_csv(index=False).encode("utf-8")
+
+                st.download_button(
+                    label="Download Report Data as CSV",
+                    data=csv_report,
+                    file_name=f"{selected_report_type.lower().replace(' ', '_')}_transactions_{file_period}.csv",
+                    mime="text/csv"
                 )
-
-                category_percentage = (
-                    highest_category_amount / total_expenses_report * 100
-                    if total_expenses_report > 0 else 0
-                )
-
-                st.write(
-                    f"Your highest spending category was **{highest_category}**, "
-                    f"representing **{category_percentage:.1f}%** of your total expenses."
-                )
-
-            st.divider()
-
-            st.subheader("Transactions Included in Report")
-
-            report_display_df = monthly_report_df[
-                [
-                    "id",
-                    "date",
-                    "type",
-                    "category",
-                    "amount",
-                    "payment_method",
-                    "description"
-                ]
-            ].copy()
-
-            report_display_df["date"] = pd.to_datetime(
-                report_display_df["date"],
-                errors="coerce"
-            ).dt.strftime("%Y-%m-%d")
-
-            st.dataframe(
-                report_display_df,
-                use_container_width=True,
-                hide_index=True
-            )
-
-            st.divider()
-
-            st.subheader("Download Report")
-
-            html_report = generate_monthly_report_html(
-                monthly_report_df,
-                selected_report_month
-            )
-
-            st.download_button(
-                label="Download HTML Report",
-                data=html_report,
-                file_name=f"monthly_financial_report_{selected_report_month}.html",
-                mime="text/html"
-            )
