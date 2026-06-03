@@ -10,7 +10,8 @@ from modules.db import (
     add_multiple_transactions,
     get_all_transactions,
     delete_transaction, 
-    update_transaction 
+    update_transaction,
+    delete_all_transactions
 )
 
 
@@ -29,6 +30,22 @@ st.set_page_config(
 # --------------------------------------------------
 create_transactions_table()
 
+DEFAULT_CATEGORIES = [
+    "Salary",
+    "Food",
+    "Fuel",
+    "Rent",
+    "Bills",
+    "Shopping",
+    "Entertainment",
+    "Coffee",
+    "Health",
+    "Transport",
+    "Subscriptions",
+    "Education",
+    "Travel",
+    "Other"
+]
 
 # --------------------------------------------------
 # Helper functions
@@ -523,10 +540,10 @@ with tab2:
             amount = st.number_input("Amount (€)", min_value=0.01, step=0.50)
 
         with col2:
-            category = st.text_input(
+            category = st.selectbox(
                 "Category",
-                placeholder="e.g. Salary, Food, Fuel, Rent"
-            )
+                DEFAULT_CATEGORIES
+)
 
             payment_method = st.selectbox(
                 "Payment Method",
@@ -542,16 +559,16 @@ with tab2:
 
         if submitted:
             if category.strip() == "":
-                st.error("Please enter a category.")
+                st.error("Please select a category.")
             else:
                 add_transaction(
-                    str(transaction_date),
-                    transaction_type,
-                    category.strip(),
-                    amount,
-                    payment_method,
-                    description.strip()
-                )
+        str(transaction_date),
+        transaction_type,
+        category.strip(),
+        amount,
+        payment_method,
+        description.strip()
+    )
 
                 st.success("Transaction saved successfully.")
                 st.rerun()
@@ -602,7 +619,23 @@ with tab3:
                 key="transactions_filter_payment"
             )
 
+            search_query = st.text_input(
+            "Search transactions",
+            placeholder="Search by category, payment method, description, type...",
+            key="transactions_search"
+        )
+
         filtered_df = transactions_df.copy()
+
+        if search_query.strip():
+            search_lower = search_query.strip().lower()
+
+            filtered_df = filtered_df[
+                filtered_df["type"].astype(str).str.lower().str.contains(search_lower, na=False) |
+                filtered_df["category"].astype(str).str.lower().str.contains(search_lower, na=False) |
+                filtered_df["payment_method"].astype(str).str.lower().str.contains(search_lower, na=False) |
+                filtered_df["description"].astype(str).str.lower().str.contains(search_lower, na=False)
+            ]
 
         if selected_type != "All":
             filtered_df = filtered_df[filtered_df["type"] == selected_type]
@@ -772,11 +805,19 @@ with tab3:
                         )
 
                     with col2:
-                        edited_category = st.text_input(
-                            "Category",
-                            value=str(transaction_to_edit["category"]),
-                            key="edited_transaction_category"
-                        )
+                        current_category = str(transaction_to_edit["category"])
+
+                        category_options = DEFAULT_CATEGORIES.copy()
+
+                        if current_category not in category_options:
+                             category_options.append(current_category)
+
+                        edited_category = st.selectbox(
+                        "Category",
+                        category_options,
+                         index=category_options.index(current_category),
+                        key="edited_transaction_category"
+)
 
                         payment_options = [
                             "Cash",
@@ -872,6 +913,34 @@ with tab3:
                             "Please confirm before deleting the transaction."
                         )
                         st.warning("Please confirm before deleting the transaction.")
+
+
+                        st.divider()
+
+            st.subheader("Clear All Transactions")
+
+            with st.expander("Delete all saved transactions"):
+                st.warning(
+                    "This action will permanently delete all transactions from the database."
+                )
+
+                confirm_clear_all = st.checkbox(
+                    "I confirm that I want to delete all transactions.",
+                    key="confirm_clear_all_transactions"
+                )
+
+                if st.button(
+                    "Delete All Transactions",
+                    key="delete_all_transactions_button"
+                ):
+                    if confirm_clear_all:
+                        delete_all_transactions()
+                        st.success("All transactions deleted successfully.")
+                        st.rerun()
+                    else:
+                        st.warning(
+                            "Please confirm before deleting all transactions."
+                        )
 
 
 # --------------------------------------------------

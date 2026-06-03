@@ -138,3 +138,15 @@ def update_transaction(transaction_id, date, transaction_type, category, amount,
 
     conn.commit()
     conn.close()
+
+def delete_all_transactions():
+    """
+    Deletes all transactions from the database.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("DELETE FROM transactions")
+
+    conn.commit()
+    conn.close()
