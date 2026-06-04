@@ -18,11 +18,22 @@ from modules.db import (
 # --------------------------------------------------
 # Page settings
 # --------------------------------------------------
+def load_css(file_path):
+    """
+    Loads a custom CSS file into the Streamlit app.
+    """
+    with open(file_path) as css_file:
+        st.markdown(
+            f"<style>{css_file.read()}</style>",
+            unsafe_allow_html=True
+        )
+
 st.set_page_config(
     page_title="Finance Data Analyzer",
     page_icon="💰",
     layout="wide"
 )
+load_css("assets/style.css")
 
 
 # --------------------------------------------------
@@ -417,17 +428,28 @@ def detect_expense_outliers(df):
 
     return outliers_df
 
+def load_css(file_path):
+    """
+    Loads a custom CSS file into the Streamlit app.
+    """
+    with open(file_path) as css_file:
+        st.markdown(
+            f"<style>{css_file.read()}</style>",
+            unsafe_allow_html=True
+        )
+
 # --------------------------------------------------
 # App title
-# --------------------------------------------------
-st.title("Finance Data Analyzer")
-
-st.write("""
-Manage your income and expenses, analyse your financial data, 
-and understand your spending habits.
-""")
-
-
+# -------------------------------------------------
+st.markdown(
+    """
+    <div class="main-title">Finance Data Analyzer</div>
+    <div class="subtitle">
+        Manage income, expenses, imports, reports and financial insights from one dashboard.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 # --------------------------------------------------
 # Load data
 # --------------------------------------------------
