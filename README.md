@@ -567,25 +567,6 @@ The current version has some limitations:
 
 ---
 
-## Future Improvements
-
-Possible future improvements include:
-
-* User authentication
-* Cloud database integration
-* Supabase or PostgreSQL support
-* Direct PDF report generation
-* More advanced UI redesign
-* Budget tracking
-* Recurring transactions
-* Automatic category prediction
-* Advanced forecasting
-* Multi-user support
-* Dark mode styling
-* More detailed financial insights
-
----
-
 ## Purpose of the Project
 
 This project was developed as a practical data analysis and finance management application.
